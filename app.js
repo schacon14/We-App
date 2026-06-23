@@ -1043,13 +1043,16 @@ async function openRedeemModal(reward) {
   btn.disabled=!canAfford;
   if (canAfford) {
     btn.addEventListener('click', async()=>{
-      await addDoc(collection(db,'redemptions'),{ coupleId:S.profile.coupleId, rewardId:reward.id, rewardName:reward.name, rewardEmoji:reward.emoji, redeemedBy:S.user.uid, pointsCost:reward.cost, status:'pending', createdAt:serverTimestamp() });
-      await updateDoc(doc(db,'users',S.user.uid),{ weeklyPoints:increment(-reward.cost), totalPoints:increment(-reward.cost) });
-      S.profile.weeklyPoints=Math.max(0,(S.profile.weeklyPoints||0)-reward.cost);
-      renderScoreHeader();
-      closeModal();
-      toast(`¡Canjeaste "${reward.name}"! 🎉`, 'gold');
-      confetti();
+      btn.disabled=true; btn.textContent='Canjeando…';
+      try {
+        await addDoc(collection(db,'redemptions'),{ coupleId:S.profile.coupleId, rewardId:reward.id, rewardName:reward.name, rewardEmoji:reward.emoji, redeemedBy:S.user.uid, pointsCost:reward.cost, status:'pending', createdAt:serverTimestamp() });
+        await updateDoc(doc(db,'users',S.user.uid),{ weeklyPoints:increment(-reward.cost), totalPoints:increment(-reward.cost) });
+        S.profile.weeklyPoints=Math.max(0,(S.profile.weeklyPoints||0)-reward.cost);
+        renderScoreHeader();
+        closeModal();
+        toast(`¡Canjeaste "${reward.name}"! 🎉`, 'gold');
+        confetti();
+      } catch(err) { toast('Error al canjear: '+err.message,'error'); btn.disabled=false; btn.textContent=`Canjear por ${reward.name} 🎉`; }
     });
   }
   const delBtn=document.createElement('button');
@@ -1071,8 +1074,11 @@ function openAddRewardModal() {
   btn.addEventListener('click',async()=>{
     const emoji=$('rew-emoji').value.trim()||'🎁', name=$('rew-name').value.trim(), cost=parseInt($('rew-cost').value)||50;
     if (!name) { toast('Ponle un nombre','error'); return; }
-    await addDoc(collection(db,'rewards'),{ coupleId:S.profile.coupleId, emoji, name, cost, createdBy:S.user.uid, createdAt:serverTimestamp() });
-    closeModal(); toast('Recompensa añadida 🎉','success');
+    btn.disabled=true; btn.textContent='Guardando…';
+    try {
+      await addDoc(collection(db,'rewards'),{ coupleId:S.profile.coupleId, emoji, name, cost, createdBy:S.user.uid, createdAt:serverTimestamp() });
+      closeModal(); toast('Recompensa añadida 🎉','success');
+    } catch(err) { toast('Error al guardar: '+err.message,'error'); btn.disabled=false; btn.textContent='Crear recompensa 🎁'; }
   });
   div.appendChild(btn);
   openModal('🎁 Nueva recompensa', div);
@@ -1167,9 +1173,12 @@ function openTaskModal(task) {
       notes: div.querySelector('#t-notes').value.trim(),
       coupleId: S.profile.coupleId,
     };
-    if (task) { await updateDoc(doc(db,'tasks',task.id), data); }
-    else { await addDoc(collection(db,'tasks'), { ...data, completed:false, createdBy:S.user.uid, createdAt:serverTimestamp() }); }
-    closeModal(); toast(task?'Tarea actualizada':'Tarea añadida ✅','success');
+    save.disabled = true; save.textContent = 'Guardando…';
+    try {
+      if (task) { await updateDoc(doc(db,'tasks',task.id), data); }
+      else { await addDoc(collection(db,'tasks'), { ...data, completed:false, createdBy:S.user.uid, createdAt:serverTimestamp() }); }
+      closeModal(); toast(task?'Tarea actualizada':'Tarea añadida ✅','success');
+    } catch(err) { toast('Error al guardar: '+err.message,'error'); save.disabled=false; save.textContent='Guardar ✓'; }
   });
   actions.appendChild(save);
   div.appendChild(actions);
@@ -1234,9 +1243,12 @@ function openEventModal(ev) {
     const endv=div.querySelector('#ev-end').value;
     const endObj=endv&&!allDay?new Date(`${dv}T${endv}:00`):null;
     const data={ title, categoryId:catGrid.querySelector('.cat-btn.selected')?.dataset.id||'other', date:Timestamp.fromDate(dateObj), endDate:endObj?Timestamp.fromDate(endObj):null, allDay, description:div.querySelector('#ev-desc').value.trim(), assignedTo:div.querySelector('#ev-assign').value, reminder:parseInt(div.querySelector('#ev-reminder').value), coupleId:S.profile.coupleId };
-    if(ev) await updateDoc(doc(db,'events',ev.id),data);
-    else await addDoc(collection(db,'events'),{...data,createdBy:S.user.uid,createdAt:serverTimestamp()});
-    closeModal(); toast(ev?'Evento actualizado':'Evento añadido 📅','success');
+    s.disabled=true; s.textContent='Guardando…';
+    try {
+      if(ev) await updateDoc(doc(db,'events',ev.id),data);
+      else await addDoc(collection(db,'events'),{...data,createdBy:S.user.uid,createdAt:serverTimestamp()});
+      closeModal(); toast(ev?'Evento actualizado':'Evento añadido 📅','success');
+    } catch(err) { toast('Error al guardar: '+err.message,'error'); s.disabled=false; s.textContent='Guardar ✓'; }
   });
   actions.appendChild(s); div.appendChild(actions);
   openModal(ev?'✏️ Editar evento':'📅 Nuevo evento',div);
@@ -1256,9 +1268,12 @@ function openReminderModal(rem) {
     const title=div.querySelector('#rem-title').value.trim(); if(!title){toast('Añade un título','error');return;}
     const days=[...div.querySelectorAll('input[type=checkbox]:checked')].map(c=>c.value);
     const data={title,time:div.querySelector('#rem-time').value,days,active:true,coupleId:S.profile.coupleId};
-    if(rem) await updateDoc(doc(db,'reminders',rem.id),data);
-    else await addDoc(collection(db,'reminders'),{...data,createdBy:S.user.uid,createdAt:serverTimestamp()});
-    closeModal(); toast('Recordatorio guardado 🔔','success');
+    s.disabled=true; s.textContent='Guardando…';
+    try {
+      if(rem) await updateDoc(doc(db,'reminders',rem.id),data);
+      else await addDoc(collection(db,'reminders'),{...data,createdBy:S.user.uid,createdAt:serverTimestamp()});
+      closeModal(); toast('Recordatorio guardado 🔔','success');
+    } catch(err) { toast('Error al guardar: '+err.message,'error'); s.disabled=false; s.textContent='Guardar recordatorio 🔔'; }
   });
   div.appendChild(s);
   openModal(rem?'✏️ Editar recordatorio':'🔔 Nuevo recordatorio',div);
@@ -1281,9 +1296,12 @@ function openRecipeModal(recipe) {
   s.addEventListener('click',async()=>{
     const name=div.querySelector('#rec-name').value.trim(); if(!name){toast('Añade un nombre','error');return;}
     const data={title:name,emoji:div.querySelector('#rec-emoji').value.trim()||'🍳',ingredients:div.querySelector('#rec-ingredients').value.split('\n').map(l=>l.trim()).filter(Boolean),steps:div.querySelector('#rec-steps').value.trim(),coupleId:S.profile.coupleId};
-    if(recipe) await updateDoc(doc(db,'recipes',recipe.id),data);
-    else await addDoc(collection(db,'recipes'),{...data,createdBy:S.user.uid,createdAt:serverTimestamp()});
-    closeModal(); toast('Receta guardada 👨‍🍳','success');
+    s.disabled=true; s.textContent='Guardando…';
+    try {
+      if(recipe) await updateDoc(doc(db,'recipes',recipe.id),data);
+      else await addDoc(collection(db,'recipes'),{...data,createdBy:S.user.uid,createdAt:serverTimestamp()});
+      closeModal(); toast('Receta guardada 👨‍🍳','success');
+    } catch(err) { toast('Error al guardar: '+err.message,'error'); s.disabled=false; s.textContent='Guardar receta 👨‍🍳'; }
   });
   actions.appendChild(s); div.appendChild(actions);
   openModal(recipe?'✏️ Editar receta':'📖 Nueva receta',div);
