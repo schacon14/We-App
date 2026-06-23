@@ -2,7 +2,7 @@
 import { initializeApp }                          from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 import { getAuth, createUserWithEmailAndPassword,
          signInWithEmailAndPassword, onAuthStateChanged,
-         signOut }                                 from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+         signOut, GoogleAuthProvider, signInWithPopup } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, doc, setDoc, getDoc,
          updateDoc, collection, addDoc, deleteDoc,
          onSnapshot, query, where, orderBy,
@@ -159,6 +159,22 @@ function showPointsPop(pts, x, y) {
   setTimeout(() => el.remove(), 1000);
 }
 
+// ===== GOOGLE SIGN-IN =====
+$('btn-google').addEventListener('click', async () => {
+  const btn = $('btn-google'); btn.disabled = true; btn.textContent = 'Conectando…';
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    await signInWithPopup(auth, provider);
+  } catch(err) {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M16.51 8H8.98v3h4.3c-.18 1-.74 1.48-1.6 2.04v2.01h2.6a7.8 7.8 0 0 0 2.38-5.88c0-.57-.05-.66-.15-1.18"/><path fill="#34A853" d="M8.98 17c2.16 0 3.97-.72 5.3-1.94l-2.6-2.04a4.8 4.8 0 0 1-7.18-2.54H1.83v2.07A8 8 0 0 0 8.98 17"/><path fill="#FBBC05" d="M4.5 10.48A4.8 4.8 0 0 1 4.5 7.52V5.45H1.83a8 8 0 0 0 0 7.1z"/><path fill="#EA4335" d="M8.98 3.58c1.32 0 2.5.45 3.44 1.35l2.54-2.54A8 8 0 0 0 1.83 5.45L4.5 7.52a4.77 4.77 0 0 1 4.48-3.94"/></svg> Continuar con Google';
+    if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+      $('login-error').textContent = 'Error Google: ' + authMsg(err.code);
+    }
+  }
+});
+
 // ===== AUTH =====
 document.querySelectorAll('.auth-tab').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -192,7 +208,7 @@ $('form-register').addEventListener('submit', async e => {
   try {
     const cred = await createUserWithEmailAndPassword(auth, email, pass);
     const uid = cred.user.uid;
-    await setDoc(doc(db,'users',uid), { displayName:name, email, color, coupleId:uid, totalPoints:0, weeklyPoints:0, weeklyWins:0, weekStart: serverTimestamp(), createdAt: serverTimestamp() });
+    await setDoc(doc(db,'users',uid), { displayName:name, email, color, coupleId:uid, totalPoints:0, weeklyPoints:0, weeklyWins:0, streak:0, lastActive:null, weekStart:serverTimestamp(), createdAt:serverTimestamp() });
     await setDoc(doc(db,'couples',uid), { members:[uid], createdAt: serverTimestamp() });
   } catch(err) { $('reg-error').textContent = authMsg(err.code); btn.disabled = false; }
 });
@@ -242,8 +258,18 @@ async function joinCouple() {
 onAuthStateChanged(auth, async user => {
   if (!user) { showScreen('auth'); return; }
   S.user = user;
-  const pSnap = await getDoc(doc(db,'users',user.uid));
-  if (!pSnap.exists()) { showScreen('auth'); return; }
+  let pSnap = await getDoc(doc(db,'users',user.uid));
+  if (!pSnap.exists()) {
+    if (user.providerData?.[0]?.providerId === 'google.com') {
+      const name = user.displayName || user.email.split('@')[0];
+      const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+      await setDoc(doc(db,'users',user.uid), { displayName:name, email:user.email, color, coupleId:user.uid, totalPoints:0, weeklyPoints:0, weeklyWins:0, streak:0, lastActive:null, weekStart:serverTimestamp(), createdAt:serverTimestamp() });
+      await setDoc(doc(db,'couples',user.uid), { members:[user.uid], createdAt:serverTimestamp() });
+      pSnap = await getDoc(doc(db,'users',user.uid));
+    } else {
+      showScreen('auth'); return;
+    }
+  }
   S.profile = pSnap.data();
   $('my-invite-code').textContent = user.uid;
 
@@ -290,6 +316,7 @@ function initApp() {
   renderScoreHeader();
   switchPage('inicio');
   $('fab-add').classList.add('visible');
+  initSwipe();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
 }
 
@@ -346,6 +373,38 @@ function renderPage(page) {
 }
 document.querySelectorAll('.nav-btn').forEach(btn => btn.addEventListener('click', () => switchPage(btn.dataset.page)));
 
+// ===== SWIPE NAVIGATION =====
+function initSwipe() {
+  const pages = ['inicio','tareas','comida','agenda','nosotros'];
+  let sx = 0, sy = 0;
+  const main = $('app-main');
+  if (!main) return;
+  main.addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+  main.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - sx;
+    const dy = e.changedTouches[0].clientY - sy;
+    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      const idx = pages.indexOf(S.currentPage);
+      if (dx < 0 && idx < pages.length - 1) switchPage(pages[idx + 1]);
+      else if (dx > 0 && idx > 0) switchPage(pages[idx - 1]);
+    }
+  }, { passive: true });
+}
+
+// ===== DARK MODE =====
+function toggleDarkMode() {
+  const isDark = document.documentElement.classList.toggle('dark');
+  localStorage.setItem('darkMode', isDark ? '1' : '0');
+  syncDarkModeBtn();
+}
+function syncDarkModeBtn() {
+  const isDark = document.documentElement.classList.contains('dark');
+  const btn = $('btn-darkmode');
+  if (!btn) return;
+  btn.querySelector('.settings-icon').textContent = isDark ? '☀️' : '🌙';
+  btn.querySelector('.settings-label').textContent = isDark ? 'Modo claro' : 'Modo oscuro';
+}
+
 // ===== SCORE HEADER =====
 function renderScoreHeader() {
   const me = S.profile, pt = S.partner;
@@ -369,7 +428,14 @@ function renderScoreHeader() {
 
   const monday = getMondayOf(new Date());
   const sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
-  $('hdr-week').textContent = `Sem. ${addZero(monday.getDate())}/${addZero(monday.getMonth()+1)}`;
+  $('hdr-week').textContent = `${addZero(monday.getDate())}/${addZero(monday.getMonth()+1)}–${addZero(sunday.getDate())}/${addZero(sunday.getMonth()+1)}`;
+
+  const streak = S.profile?.streak || 0;
+  const streakEl = $('hdr-streak');
+  if (streakEl) {
+    if (streak >= 2) { streakEl.textContent = `🔥 ${streak} días`; streakEl.classList.remove('hidden'); }
+    else { streakEl.classList.add('hidden'); }
+  }
 }
 
 // ===== QUICK ACTIONS =====
@@ -496,7 +562,8 @@ function buildTaskCard(task, showComplete) {
   } else if (!task.completed && showComplete) {
     const pb = document.createElement('button');
     pb.className = 'photo-btn';
-    pb.textContent = '📸 +' + POINTS_PHOTO;
+    pb.innerHTML = `📸 <strong>+${POINTS_PHOTO}</strong>`;
+    pb.title = `Añade foto y gana el doble de puntos (+${POINTS_PHOTO} vs +${POINTS_NO_PHOTO})`;
     pb.addEventListener('click', e => { e.stopPropagation(); triggerPhotoUpload(task); });
     div.appendChild(pb);
   }
@@ -520,9 +587,29 @@ async function completeTask(task, e) {
   const rect = e.target.getBoundingClientRect();
   await updateDoc(doc(db,'tasks',task.id), { completed: true, completedBy: S.user.uid, completedAt: serverTimestamp() });
   await addPoints(POINTS_NO_PHOTO);
+  updateStreak();
   showPointsPop(POINTS_NO_PHOTO, rect.left, rect.top);
   toast(`+${POINTS_NO_PHOTO} puntos ⭐ ¡Tarea completada!`, 'gold');
   confetti();
+}
+
+async function updateStreak() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const last = S.profile.lastActive ? toDate(S.profile.lastActive) : null;
+  let newStreak;
+  if (last) {
+    last.setHours(0,0,0,0);
+    const diffDays = Math.round((today - last) / 86400000);
+    if (diffDays === 0) return;
+    newStreak = diffDays === 1 ? (S.profile.streak || 0) + 1 : 1;
+  } else {
+    newStreak = 1;
+  }
+  S.profile.streak = newStreak;
+  S.profile.lastActive = Timestamp.fromDate(today);
+  await updateDoc(doc(db,'users',S.user.uid), { streak: newStreak, lastActive: Timestamp.fromDate(today) });
+  renderScoreHeader();
+  if (newStreak >= 3 && newStreak % 3 === 0) toast(`🔥 ¡${newStreak} días seguidos! Racha increíble`, 'gold');
 }
 
 // ===== PHOTO UPLOAD =====
@@ -545,6 +632,7 @@ async function uploadTaskPhoto(taskId, file) {
     const url = await getDownloadURL(ref);
     await updateDoc(doc(db,'tasks',taskId), { photoUrl: url, photoStoragePath: path, completed: true, completedBy: S.user.uid, completedAt: serverTimestamp(), photoReactions: {} });
     await addPoints(POINTS_PHOTO);
+    updateStreak();
     toast(`+${POINTS_PHOTO} puntos 📸 ¡Foto subida!`, 'gold');
     confetti();
   } catch(err) { toast('Error al subir la foto: '+err.message, 'error'); }
@@ -702,6 +790,8 @@ function renderShopItems() {
   const unchecked = items.filter(i=>!i.checked), checked = items.filter(i=>i.checked);
   [...unchecked, ...checked].forEach(item => el.appendChild(buildShopItem(item)));
   $('shop-empty').classList.toggle('hidden', items.length > 0);
+  const clearBtn = $('btn-clear-shop');
+  if (clearBtn) clearBtn.classList.toggle('hidden', !S.shopItems.some(i => i.checked));
 }
 function buildShopItem(item) {
   const div = document.createElement('div');
@@ -719,6 +809,13 @@ function buildShopItem(item) {
 }
 $('shop-input').addEventListener('keydown', e => { if (e.key==='Enter') addShopItem(); });
 $('btn-add-shop').addEventListener('click', addShopItem);
+$('btn-clear-shop').addEventListener('click', async () => {
+  const checked = S.shopItems.filter(i => i.checked);
+  if (!checked.length) return;
+  if (!confirm(`¿Borrar ${checked.length} producto${checked.length > 1 ? 's' : ''} tachado${checked.length > 1 ? 's' : ''}?`)) return;
+  for (const item of checked) await deleteDoc(doc(db,'shoppingItems',item.id));
+  toast('Lista limpia 🧹', 'success');
+});
 async function addShopItem() {
   const val = $('shop-input').value.trim(); if (!val) return;
   const cat = S.shopFilter==='all' ? SHOP_CATS[11] : S.shopFilter;
@@ -846,8 +943,10 @@ function renderReminders() {
   const el=$('reminder-list'); el.innerHTML='';
   S.reminders.forEach(r=>{
     const card=document.createElement('div'); card.className='reminder-card';
-    card.innerHTML=`<div class="reminder-icon">🔔</div><div class="reminder-body"><div class="reminder-title">${r.title}</div><div class="reminder-time">${r.time||''} · ${(r.days||[]).join(', ')}</div></div><label class="toggle reminder-toggle"><input type="checkbox" ${r.active?'checked':''}><span class="toggle-slider"></span></label>`;
-    card.querySelector('input').addEventListener('change',e=>updateDoc(doc(db,'reminders',r.id),{active:e.target.checked}));
+    const daysLabel = (r.days||[]).length ? (r.days||[]).join(', ') : 'Sin días';
+    card.innerHTML=`<div class="reminder-icon">🔔</div><div class="reminder-body"><div class="reminder-title">${r.title}</div><div class="reminder-time">${r.time||''}${r.time?' · ':''}${daysLabel}</div></div><label class="toggle reminder-toggle"><input type="checkbox" ${r.active?'checked':''}><span class="toggle-slider"></span></label>`;
+    card.querySelector('input').addEventListener('change',e=>{e.stopPropagation();updateDoc(doc(db,'reminders',r.id),{active:e.target.checked});});
+    card.querySelector('.reminder-body').addEventListener('click',()=>openReminderModal(r));
     el.appendChild(card);
   });
   $('reminder-empty').classList.toggle('hidden',S.reminders.length>0);
@@ -858,6 +957,7 @@ function renderNosotros() {
   renderRankingCard();
   renderRewards();
   renderRedemptions();
+  syncDarkModeBtn();
   const el=$('nos-profile');
   el.innerHTML=`<span class="settings-icon" style="background:${S.profile.color||'var(--p1)'};border-radius:50%;width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px">${(S.profile.displayName||'?')[0].toUpperCase()}</span><div style="flex:1"><div class="settings-label">${S.profile.displayName}</div><div style="font-size:12px;color:var(--text-3)">${S.profile.email}</div></div>`;
 }
@@ -878,7 +978,8 @@ function renderRankingCard() {
         </div>
         <div class="ranking-name">${me?.displayName?.split(' ')[0]||'Tú'}</div>
         <div class="ranking-pts">${myPts}</div>
-        <div class="ranking-wins">🏆 ${me?.weeklyWins||0} semanas</div>
+        <div class="ranking-wins">🏆 ${me?.weeklyWins||0} sem. ganadas</div>
+        ${(me?.streak||0)>=2?`<div class="ranking-wins">🔥 ${me.streak} días seguidos</div>`:''}
       </div>
       <div class="ranking-vs">VS</div>
       <div class="ranking-player">
@@ -888,7 +989,8 @@ function renderRankingCard() {
         </div>
         <div class="ranking-name">${pt?.displayName?.split(' ')[0]||'Pareja'}</div>
         <div class="ranking-pts">${ptPts}</div>
-        <div class="ranking-wins">🏆 ${pt?.weeklyWins||0} semanas</div>
+        <div class="ranking-wins">🏆 ${pt?.weeklyWins||0} sem. ganadas</div>
+        ${(pt?.streak||0)>=2?`<div class="ranking-wins">🔥 ${pt.streak} días seguidos</div>`:''}
       </div>
     </div>
     <div class="ranking-bar-wrap">
@@ -1188,6 +1290,7 @@ function openRecipeModal(recipe) {
 }
 
 // ===== SETTINGS ACTIONS =====
+$('btn-darkmode').addEventListener('click', toggleDarkMode);
 $('btn-notifications').addEventListener('click',async()=>{
   if(!('Notification' in window)){alert('Tu navegador no soporta notificaciones.');return;}
   const p=await Notification.requestPermission();
