@@ -1,4 +1,4 @@
-const CACHE = 'nosotros-v1';
+const CACHE = 'nosotros-v2';
 const ASSETS = ['./index.html', './styles.css', './app.js'];
 
 self.addEventListener('install', e => {
@@ -17,8 +17,15 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if (!e.request.url.startsWith(self.location.origin)) return;
+  // Network first: intenta red, cae en caché si offline
   e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request))
+    fetch(e.request)
+      .then(res => {
+        const copy = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, copy));
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });
 
